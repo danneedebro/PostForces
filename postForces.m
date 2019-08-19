@@ -52,9 +52,11 @@ function postForces(varargin)
 % Version 1.00      Daniel Edebro
 % Nytt script
 %
+% Version 1.01      Daniel Edebro
+% Fixat bugg där peps-filer blev korrupta pga av samtidig skrivning till
+% temporär mapp. Nu skapas en tillfällig katalog som sedan tas bort.
 %
-%
-versionNumber = 1.00;
+versionNumber = 1.01;
 
 
 global Data
@@ -88,11 +90,10 @@ screening = 10;
 % Parametrar som styr utseendet på plottarna
 colorVector = [1,0,0;0,0,0;0,0,1;0,1,0;0.5,0.5,0];
 
-
 fprintf('postForces version %1.2f\n\n',versionNumber);
+
+
 fprintf('1. LÄSER ARGUMENT OCH KONTROLLERAR INDATA\n');
-
-
 % Skriv ut inläst syntax (underlättar felsökning)
 fprintf('   syntax: postForces(');
 for i = 1:size(varargin,2);
@@ -110,11 +111,9 @@ for i = 1:size(varargin,2);
 end
 fprintf(')\n\n');
 
-
 % Läs in argument i 'varargin'
 fprintf('   argument:\n'); 
 for i = 1:size(varargin,2);
-    
     % om 'inputfilename' läses antas att nästa argument är filnamn
     if strcmpi(varargin{i},'-str')
         stripFilePath = '';
@@ -134,20 +133,10 @@ for i = 1:size(varargin,2);
         i = i + 1;%#ok
         fprintf('      plotFigures: %d\n',plotFigures);
     elseif strcmpi(varargin{i},'-peps')
-        tmpPepsPath = varargin{i+1};
-        
-        % Parse:a sökvägen
-        periods = strfind(tmpPepsPath,'\');
-        if isempty(periods)
-            pipestressfilePath = ''; 
-            pipestressfile = tmpPepsPath;
-        else
-            pipestressfilePath = tmpPepsPath(1:periods(length(periods)));
-            pipestressfile = tmpPepsPath(1+periods(length(periods)):length(tmpPepsPath));
-        end
+        [pepsFilePath, pepsFile, pepsFileExt] = fileparts(varargin{i+1});
         locatePepsFile = 0;
         i = i + 1;%#ok
-        fprintf('      .pipestress-fil: %s\n',pipestressfile);    
+        fprintf('      .pipestress-fil: %s\n', fullfile(pepsFilePath, strcat(pepsFile, pepsFileExt)));    
     % gör pipestressfiler
     elseif strcmpi(varargin{i},'makePipestress')
         makePipestress = varargin{i+1};
@@ -215,13 +204,12 @@ for i = 1:size(varargin,2);
 end
 fprintf('\n');
 
-
 ElapsedTime = 0;
-
 
 % Definera en temporär sökväg för att snabba upp skrivning av
 % pipestressfiler när man jobbar mot en nätverksdisk
-tempPath = 'c:\temp\';
+tempPath = tempname('c:\temp\');
+mkdir(tempPath);
 
 
 % Om flaggan 'locateInputFile' är sann så ska fil att läsa specificeras
@@ -238,12 +226,12 @@ end
 % Sker då parametern '-peps' inte anges som argument eller argumentet
 % 'makePipestress',0 anges
 if makePipestress == 1 && locatePepsFile == 1
-        [pipestressfile, pipestressfilePath] = uiputfile({'*.pipestress','Pipestress load data (*.pipestress)';'*.*','Alla filer (*.*)'},'Pipestress: Spara som...',lastPath);
-        if pipestressfile == 0 
+        [fn, fp] = uiputfile({'*.pipestress','Pipestress load data (*.pipestress)';'*.*','Alla filer (*.*)'},'Pipestress: Spara som...',lastPath);
+        [pepsFilePath, pepsFile, pepsFileExt] = fileparts(fullfile(fp, fn));
+        if fn == 0 
             makePipestress=0; 
         else
-            if ~strcmp(pipestressfilePath(length(pipestressfilePath):length(pipestressfilePath)),'\'), pipestressfilePath = [pipestressfilePath,'\']; end
-            lastPath = pipestressfilePath;
+            lastPath = pepsFilePath;
         end
 end
 
@@ -261,8 +249,6 @@ if locatePlotFile == 1
     
     plotFilename = [plotfilePath,plotfile];
 end
-
-
 
 % Kontrollera input
 fprintf('   Kontrollerar .str-fil...\n');
@@ -310,9 +296,6 @@ if setPlotReduction == 1
     end
 end
 
-
-
-
 fprintf('   Kontrollerar angivna parametrar:\n');
 if tmin < tmin_file, fprintf('      tmin < tmin_file\n'); else fprintf('      tmin: OK\n');end
 if tmax > tmax_file, fprintf('      tmax > tmin_file\n'); else fprintf('      tmax: OK\n');end
@@ -321,7 +304,6 @@ for i = 1:length(multVec), fprintf('%dX dt0,',multVec(i)); end
 fprintf('\n');
     
 fprintf('\n');
-
 
 % Om 'selectForces' lika med 1 visas listruta där samtliga krafter visas
 % varefter användaren själv kan välja vilka som ska plottas.
@@ -338,8 +320,9 @@ end
 
 
 
-tic
+
 fprintf('2. LÄSER .STR-FIL (%s)\n',[stripFilePath,stripFile]);
+tic
 rawData = readStrfile([stripFilePath,stripFile],tmin,tmax,tsamp,10000000);
 ElapsedTime=ElapsedTime+toc;
 
@@ -358,14 +341,7 @@ dt = mean(diff(timeVec));
 % Filnamn_1X.ps - Orginaldatans plott
 % Filnamn_4X.ps - Nedsamplingens plott
 if plotFigures == 1
-    periods = strfind(plotFilename,'.');
-    if isempty(periods)
-        plotfilenamePrefix = plotFilename; 
-        plotfilenameSuffix = '';
-    else
-        plotfilenamePrefix = plotFilename(1:periods(length(periods))-1);
-        plotfilenameSuffix = plotFilename(periods(length(periods)):length(plotFilename));
-    end
+    [psFilePath, psFile, psFileExt] = fileparts(plotFilename);
 end
 
 
@@ -382,20 +358,12 @@ Nmax = length(multVec);   % antal nedsamplingar
 % (ex Filnamn.pipestress, Filnamn_1X.pipestress, etc)
 % 
 if makePipestress == 1
-    periods = strfind(pipestressfile,'.');
-    if isempty(periods)
-        filenamePrefix = pipestressfile; 
-        filenameSuffix = '';
-    else
-        filenamePrefix = pipestressfile(1:periods(length(periods))-1);
-        filenameSuffix = pipestressfile(periods(length(periods)):length(pipestressfile));
-    end
-    
     % Loopa igenom 'multVec' och öppna pipestressfiler för input
     fidPeps = zeros(1,Nmax);
     for i = 1:Nmax
-        fidPeps(i) = fopen(sprintf('%s%s_%dX%s',tempPath,filenamePrefix,multVec(i),filenameSuffix),'w');
-        if fidPeps(i) == -1, fprintf('   Error, kan inte öppna ''%s%s_%dX%s'' för output\n',tempPath,filenamePrefix,multVec(i),filenameSuffix); makePipestress = 0; end 
+        fn = fullfile(tempPath, sprintf('%s_%dX%s', pepsFile, multVec(i), pepsFileExt));
+        fidPeps(i) = fopen(fn, 'w');
+        if fidPeps(i) == -1, fprintf('   Error, kan inte öppna ''%s'' för output\n', fn); makePipestress = 0; end 
     end
 end
 
@@ -469,7 +437,7 @@ for i = 1:length(forcesToProcess)
         % tillgänglig även om DLF inte ska beräknas
         if i == 1
             tmpForce = sin(2*pi*15*timeVecN)+sin(2*pi*25*timeVecN);
-            [frekvens,~] = getDLF6c(timeVecN,tmpForce,damp,cutoff);
+            [frekvens,~] = getDLF6c(timeVecN, tmpForce, damp, cutoff);
             Data(j).frequency = frekvens;
         end
         
@@ -543,9 +511,6 @@ for i = 1:length(forcesToProcess)
     
     
     if plotFigures == 1
-        
-        
-        
         legendText = cell(1,length(multVec));
         for j = 1:Nmax
             set(timePlot(j),'LineWidth',1);
@@ -558,15 +523,14 @@ for i = 1:length(forcesToProcess)
             set(freqPlot(j),'LineWidth',1);
             set(freqPlot(j),'LineStyle','-');
             legendText{j} = sprintf('t_s_a_m_p = %dX dt_0',multVec(j));
-            
         end
         
         legendText{Nmax+1} = sprintf('t_s_a_m_p = %dX dt_0 +/- %1.0f%%',multVec(1),screening);
         %legendText{Nmax+2} = sprintf('dt/%d - 10%%',multVec(1));
         
         % Sätt plottegenskaper för felgränserna
-        set(freqPlot(length(multVec)+1),'LineStyle','.');
-        set(freqPlot(length(multVec)+2),'LineStyle','.');
+        set(freqPlot(length(multVec)+1),'LineStyle','-');
+        set(freqPlot(length(multVec)+2),'LineStyle','-');
         set(freqPlot(length(multVec)+1),'Color',colorVector(1,:));
         set(freqPlot(length(multVec)+2),'Color',colorVector(1,:));
         set(freqPlot(length(multVec)+1),'MarkerSize',3);
@@ -605,10 +569,11 @@ for i = 1:length(forcesToProcess)
         end
     
         % Om första grafen kör INTE 'append'
+        fn = fullfile(psFilePath, strcat(psFile, psFileExt));
         if i == 1
-            print('-dpsc','-loose','-r300',plotFilename)
+            print('-dpsc','-loose','-r300', fn)
         else
-            print('-dpsc','-loose','-r300','-append',plotFilename)
+            print('-dpsc','-loose','-r300','-append', fn)
         end
         
         % Skriv ut individuella plottar
@@ -634,14 +599,12 @@ for i = 1:length(forcesToProcess)
                 set(plot2legend, 'Visible', 'off');
             end
             
-            
-            plotFilenameInd = sprintf('%s_%dX%s',plotfilenamePrefix,multVec(j),plotfilenameSuffix);
+            fn = fullfile(psFilePath, sprintf('%s_%dX%s', psFile, multVec(j), psFileExt));
             if i == 1
-                print('-dpsc','-loose','-r300',plotFilenameInd)
+                print('-dpsc','-loose','-r300', fn)
             else
-                print('-dpsc','-loose','-r300','-append',plotFilenameInd)
+                print('-dpsc','-loose','-r300','-append', fn)
             end
-            
         end
     
         % hold off;bar([1,2],[13,2],'FaceColor',[0,0,1]);hold on;bar([1,2],[-4,-6],'FaceColor',[1,0,0]);
@@ -660,23 +623,21 @@ if makePipestress == 1
     % Stäng fid:ar
     for i = 1:Nmax
         fclose(fidPeps(i));
-        src = sprintf('%s%s_%dX%s',tempPath,filenamePrefix,multVec(i),filenameSuffix);
-        trg = sprintf('%s%s_%dX%s',pipestressfilePath,filenamePrefix,multVec(i),filenameSuffix);
-        fprintf('   Flyttar "%s" från temporär mapp\n      %s --> %s\n',sprintf('%s_%dX%s',filenamePrefix,multVec(i),filenameSuffix),src,trg);
-        success = movefile(src,trg);
-        if success == 0, fprintf('      Error, misslyckades att flytta pipestressfil från "%s" till "%s"\n',src,trg); end
+        src = fullfile(tempPath, sprintf('%s_%dX%s', pepsFile, multVec(i), pepsFileExt));
+        trg = fullfile(pepsFilePath, sprintf('%s_%dX%s', pepsFile, multVec(i), pepsFileExt));
+        fprintf('   Flyttar "%s" från temporär mapp\n      %s --> %s\n', sprintf('%s_%dX%s', pepsFile, multVec(i), pepsFileExt), src, trg);
+        success = movefile(src, trg);
+        if success == 0, fprintf('      Error, misslyckades att flytta pipestressfil från "%s" till "%s"\n', src, trg); end
     end
 end
 
 % Skriv sammanfattning
 if writeXLSsummary == 1 && plotFigures == 1
-    fid = fopen([plotfilenamePrefix,'.xls'],'w');
+    fn = fullfile(tempPath, strcat(psFile, '.xls')); 
+    fid = fopen(fn, 'w');
     if fid == -1
-        fprintf('\n   Error, misslyckades att skriva till %s.xls\n      Skriver till _ver2.xls\n',plotfilenamePrefix); 
-        fid = fopen([plotfilenamePrefix,'_ver2.xls'],'w');
-        if fid == -1, fprintf('\n   Error, misslyckades att skriva till %s_ver2.xls\n',plotfilenamePrefix);  return; end
+        fprintf('\n   Error, misslyckades att skriva till %s\n      Skriver till _ver2.xls\n', fn); 
     end
-    
     
     forceCnt = length(Data(1).plotvar);
     
@@ -779,9 +740,21 @@ if writeXLSsummary == 1 && plotFigures == 1
         fprintf(fid,'\n');
     end
     fclose(fid);
+    
+    % Flytta fil
+    trg = fullfile(psFilePath, strcat(pepsFile, '.xls'));
+    fprintf('   Flyttar "%s" från temporär mapp\n      %s --> %s\n', strcat(psFile, '.xls'), fn, trg);
+    success = movefile(fn, trg);
+    if success == 0, fprintf('      Error, misslyckades att flytta .xls-fil från "%s" till "%s"\n', fn, trg); end
 end
 
-
+% Ta bort temporär katalog
+success = rmdir(tempPath,'s');
+if success == 1
+    fprintf('\n   Tar bort temporär katalog ''%s''\n\n', tempPath);
+else
+    fprintf('\n   Misslyckades med att ta bort temporär katalog ''%s''\n\n', tempPath);
+end
 
 % Skriv ut syntax för att lättare kunna upprepa samma körning
 fprintf('Syntax\n');
